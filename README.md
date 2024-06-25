@@ -9,4 +9,3 @@
 - SCK   -  GPIO14  :  D5
 - RST   -  GPIO2   :  D4
 - DIO0  -  GPIO5   :  D1
-
