@@ -9,7 +9,7 @@ void setupLoRa(long frequency);
 void sendMessage(String outgoing, byte destination);
 void onReceive(int packetSize);
 void showData(void);
-void callback(void);
+void callback(String payload);
 void setupLed(uint8_t LED, uint8_t STATUS);
 void ledBlink(uint8_t LED);
 void ledToogle(uint8_t LED);
@@ -30,6 +30,7 @@ const int rst = 4;
 const int dio0 = 5;
 
 // VARIÁVEIS
+String incoming = "";
 String outgoing;
 byte msgCount = 0;
 byte localAddress = 0x02;
@@ -107,7 +108,7 @@ void showData(void) {
   byte incomingMsgId = LoRa.read();                                   // ID da mensagem
   byte incomingLength = LoRa.read();                                  // comprimento da mensagem
 
-  String incoming = "";                                               // percorre conteúdo da mensagem e armazena os dados
+  incoming = "";                                                      // percorre conteúdo da mensagem e armazena os dados
   while (LoRa.available()) {
     incoming += (char)LoRa.read();
   } 
@@ -133,7 +134,7 @@ void showData(void) {
 }
 
 // RESPONDE MENSAGEM AO MASTER
-void callback(void) {
+void callback() {
   if (incoming == "GET_STATUS") { 
     ledToogle(LED_BUILTIN);
     led1State = !led1State;
