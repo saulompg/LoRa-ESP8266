@@ -79,7 +79,7 @@ void receivedData(void) {
   } 
   // ------------------------------------------------------------------- VERIFICA SE O COMPRIMENTO RECEBIDO CORRESPONDE AO ENVIADO
   if (incomingLength != incoming.length()) {
-    Serial.println("erro: tamanho da mensagem não corresponde\n");
+    Serial.println("erro no comprimento da mensagem recebida via LoRa");
     return;
   }
   // ------------------------------------------------------------------- EXIBE CONTEÚDO DA MENSAGEM
@@ -89,8 +89,7 @@ void receivedData(void) {
   // Serial.println("Mensagem: " + incoming);
   // Serial.println("RSSI: " + String(LoRa.packetRssi()));
   // Serial.println("Snr: " + String(LoRa.packetSnr()));
-  Serial.print("Recebido LoRa[0x" + String(sender, HEX) + "]: ");
-  Serial.println(incoming);
+  Serial.println("Recebido LoRa[0x" + String(sender, HEX) + "]: " + incoming);
 
   // Envia ao MQTT Feedback do Estado do Acionamento
   feedback(incoming);
@@ -101,10 +100,10 @@ void feedback(String command) {
   String feedback;
   
   if (command == "STATE:REQUEST") {
-      // Envia o estado atual dos relés
-      feedback = "STATE|";
-      feedback += "LED:" + String(digitalRead(LED_BUILTIN) ? "ON" : "OFF") + "|";
-      feedback += "RELAY1:" + String(digitalRead(relay1Pin) ? "ON" : "OFF");
+    // Envia o estado atual dos relés
+    feedback = "STATE ";
+    feedback += "LED:" + String(digitalRead(LED_BUILTIN) ? "ON" : "OFF") + " ";
+    feedback += "RELAY1:" + String(digitalRead(relay1Pin) ? "ON" : "OFF");
   } else if (command.startsWith("LED:")) {
     String state = command.substring(4);
     if (state == "ON") {
@@ -125,20 +124,23 @@ void feedback(String command) {
     }
   } 
   
-  Serial.print("Enviado LoRa[0x" + String(masterAddress) + "]: ");
-  Serial.println(feedback);
+  Serial.println("Enviado LoRa[0x" + String(masterAddress) + "]: " + feedback);
   sendMessage(feedback, masterAddress);
 }
 
 // --------------------------------------------------------------------- FUNÇÃO SETUP
 void setup() {
   Serial.begin(115200);
+
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(relay1Pin, OUTPUT);
+
   digitalWrite(LED_BUILTIN, HIGH);
   digitalWrite(relay1Pin, LOW);
+
   setupLoRa(433E6);
   LoRa.receive();
+  
   Serial.println("\nESP8266 SLAVE iniciado");
 }
 

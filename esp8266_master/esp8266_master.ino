@@ -68,24 +68,6 @@ void setupMQTT(void) {
   client.setCallback(callback);                                       // Define função callback
 }
 
-// --------------------------------------------------------------------- CONEXÃO MQTT
-void connectMQTT(void) {
-  while(!client.connected()) {
-    Serial.print("Estabelecendo conexão com o servidor: ");
-    if(client.connect("ESP8266Client", mqtt_user, mqtt_password)) {
-      Serial.println("Conectado!");
-      client.publish(topic_esp_available, "online");
-      client.subscribe(topic_led_set);
-      client.subscribe(topic_switch1_set);
-    } else {
-      Serial.print("Falha, rc=");
-      Serial.print(client.state());
-      Serial.println(" tentando novamente em 5 segundos");
-      delay(5000);
-    }
-  }
-}
-
 // --------------------------------------------------------------------- CALLBACK MQTT
 void callback(char* topic, byte* payload, unsigned int length) {
   // Converte Array de Bytes em String
@@ -116,12 +98,30 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
 }
 
+// --------------------------------------------------------------------- CONEXÃO MQTT
+void connectMQTT(void) {
+  while(!client.connected()) {
+    Serial.print("Estabelecendo conexão com o servidor: ");
+    if(client.connect("ESP8266Master", mqtt_user, mqtt_password)) {
+      Serial.println("Conectado!");
+      client.publish(topic_esp_available, "online");
+      client.subscribe(topic_led_set);
+      client.subscribe(topic_switch1_set);
+    } else {
+      Serial.print("Falha, rc=");
+      Serial.print(client.state());
+      Serial.println(" tentando novamente em 5 segundos");
+      delay(5000);
+    }
+  }
+}
+
 // --------------------------------------------------------------------- CONFIGURAÇÃO LoRa
 void setupLoRa(long frequency) {
   LoRa.setPins(ss, rst, dio0);                                        // Define configuração LoRa
-  while (!LoRa.begin(frequency)) {                                    // Inicializa a comunicação LoRa
-    Serial.println(".");
-    delay(500);
+  if (!LoRa.begin(frequency)) {                                    // Inicializa a comunicação LoRa
+    Serial.println("Erro ao iniciar LoRa");
+    while (1);
   }
   LoRa.onReceive(onReceive);                                          // Define o que será realizado ao receber uma mensagem LoRa
   // LoRa.setTxPower(20);
@@ -134,9 +134,9 @@ void setupLoRa(long frequency) {
 }
 
 // --------------------------------------------------------------------- SUBROTINA PARA ENVIO DE DADOS
-void sendMessage(String outgoing, byte destination) {
+void sendMessage(String outgoing, byte address) {
   LoRa.beginPacket();                                                 // inicializa o envio dos pacotes
-  LoRa.write(destination);                                            // adiciona o endereço de destino
+  LoRa.write(address);                                            // adiciona o endereço de destino
   LoRa.write(localAddress);                                           // adiciona o endereço do emissor
   LoRa.write(outgoing.length());                                      // adiciona comprimento do payload
   LoRa.print(outgoing);                                               // adiciona payload
@@ -151,7 +151,7 @@ void onReceive(int packetSize) {
 }
 
 // --------------------------------------------------------------------- SUBROTINA PARA PROCESSAR DADOS DA MENSAGEM RECEBIDA
-void receiveData(void) {
+void receivedData(void) {
   // ------------------------------------------------------------------- LENDO BYTES DO CABEÇALHO DO PACOTE
   int recipient = LoRa.read();                                        // endereço do destinatário
   byte sender = LoRa.read();                                          // endereço do remetente
@@ -233,7 +233,7 @@ void loop() {
   }
   // ------------------------------------------------------------------- EXECUTA AO RECEBER UMA MENSAGEM
   if (dataReceived) {
-    receiveData();
+    receivedData();
     dataReceived = false;
   }
 }
