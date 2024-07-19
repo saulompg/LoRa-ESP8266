@@ -1,46 +1,48 @@
-// ----------------------------------------------------------------------- DIRETIVAS DE PRÉ-PROCESSAMENTO
+// --------------------------------------------------------------------- DIRETIVAS DE PRÉ-PROCESSAMENTO
 #include <SPI.h>
 #include <LoRa.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
-// ----------------------------------------------------------------------- CONFIGURAÇÃO LoRa GPIO
-/* 
-  CONEXÃO LoRa RA-02:ESP8266
-  NSS   GPIO05 - D1
-  MOSI  GPIO13 - D7
-  MISO  GPIO12 - D6
-  SCK   GPIO14 - D5
-  RST   GPIO16 - D0
-  DIO0  GPIO04 - D2
-*/
-const int ss = 5;
-const int rst = 16;
-const int dio0 = 4;
+// --------------------------------------------------------------------- VARIÁVEIS AUXILIARES
+// --------------------------------------------------------------------- LoRa GPIO
+const int ss = D0;
+const int rst = D4;
+const int dio0 = D8;
+// --------------------------------------------------------------------- MENSAGEM
+volatile bool dataReceived = false;                                   // Acusa o recebimento de dados
+byte localAddress = 0x02;                                             // endereço deste dispositivo
+byte masterAddress = 0x01;                                            // endereço do master
+byte broadcast = 0xFF;                                                // endereço broadcast
+// --------------------------------------------------------------------- TIMER
+unsigned long lastSendTime = 0;
+const int interval = 60000;
 
-// ----------------------------------------------------------------------- VARIÁVEIS AUXILIARES
-// ----------------------------------------------------------------------- MENSAGEM
-volatile bool dataReceived = false;
-byte localAddress = 0x02;
-byte masterAddress = 0x01;
-byte broadcast = 0xFF;
+// --------------------------------------------------------------------- PINOUT RELAY
+const int relay1Pin = D1;
+const int relay2Pin = D2;
+// SENSOR DE TEMPERATURA DS18B20 
+const int oneWireBus = D3;  
+// define uma instância do OneWire
+OneWire oneWire(oneWireBus);
+// Envia a referência do OneWire para o sensor de temperatura Dallas
+DallasTemperature sensors(&oneWire);
+float temperatura;
 
-// ----------------------------------------------------------------------- PINOUT RELAY
-#define LED_BUILTIN 2
-const int relay1Pin = 15;
-
-// ----------------------------------------------------------------------- DECLARAÇÃO DAS FUNÇÕES
-// ----------------------------------------------------------------------- CONFIGURAÇÃO LoRa
+// --------------------------------------------------------------------- DECLARAÇÃO DAS FUNÇÕES
+// --------------------------------------------------------------------- CONFIGURAÇÃO LoRa
 void setupLoRa(long frequency) {
-  LoRa.setPins(ss, rst, dio0);                                          // Define configuração LoRa
-  while (!LoRa.begin(frequency)) {                                      // Inicializa a comunicação LoRa
-    Serial.println(".");
-    delay(500);
+  LoRa.setPins(ss, rst, dio0);                                        // Define configuração LoRa
+  if (!LoRa.begin(frequency)) {                                       // Inicializa a comunicação LoRa
+    Serial.println("Erro ao iniciar LoRa");
+    while(1);
   }
   LoRa.onReceive(onReceive);
+  LoRa.setSyncWord(0x2A);
   // LoRa.setTxPower(20);
   // LoRa.setSpreadingFactor(12);
   // LoRa.setSignalBandwidth(62.5E3);
   // LoRa.setCodingRate4(8);
-  // LoRa.setSyncWord(0x2A);
   delay(5000);
 }
 
@@ -79,7 +81,7 @@ void receivedData(void) {
   } 
   // ------------------------------------------------------------------- VERIFICA SE O COMPRIMENTO RECEBIDO CORRESPONDE AO ENVIADO
   if (incomingLength != incoming.length()) {
-    Serial.println("erro no comprimento da mensagem recebida via LoRa");
+    Serial.println("erro no comprimento da mensagem recebida via LoRa.\n");
     return;
   }
   // ------------------------------------------------------------------- EXIBE CONTEÚDO DA MENSAGEM
@@ -90,54 +92,60 @@ void receivedData(void) {
   // Serial.println("RSSI: " + String(LoRa.packetRssi()));
   // Serial.println("Snr: " + String(LoRa.packetSnr()));
   Serial.println("Recebido LoRa[0x" + String(sender, HEX) + "]: " + incoming);
-
-  // Envia ao MQTT Feedback do Estado do Acionamento
+  // ------------------------------------------------------------------- Envia ao MQTT Feedback do Estado do Acionamento
   feedback(incoming);
 }
 
-// -------------------------------------------------------------------------- SUBROTINA PARA PROCESSAR COMANDOS DO MASTER
+// --------------------------------------------------------------------- SUBROTINA PARA PROCESSAR COMANDOS DO MASTER
 void feedback(String command) {
   String feedback;
-  
-  if (command == "STATE:REQUEST") {
-    // Envia o estado atual dos relés
+  // ------------------------------------------------------------------- DETERMINA MENSAGEM DE FEEDBACK
+  if (command == "STATE:REQUEST") { // --------------------------------- ENVIA STATUS DE TODOS OS DISPOSITIVOS
     feedback = "STATE ";
-    feedback += "LED:" + String(digitalRead(LED_BUILTIN) ? "ON" : "OFF") + " ";
-    feedback += "RELAY1:" + String(digitalRead(relay1Pin) ? "ON" : "OFF");
-  } else if (command.startsWith("LED:")) {
-    String state = command.substring(4);
+    feedback += "TEMP:" + String(temperatura) + " ";
+    feedback += "RELAY1:" + String(!digitalRead(relay1Pin) ? "ON" : "OFF") + " ";
+    feedback += "RELAY2:" + String(!digitalRead(relay2Pin) ? "ON" : "OFF");
+  }  else if (command == "TEMP:GET") { // ----------------------------- ENVIA VALOR DO SENSOR DE TEMPERATURA
+    feedback = "TEMP:" + String(temperatura);
+  } else if (command.startsWith("RELAY1:")) { // ---------------------- ENVIA STATUS DO RELAY 1
+    String state = command.substring(7);
     if (state == "ON") {
-      digitalWrite(LED_BUILTIN, LOW);
-      feedback = "LED:ON";
-    } else if (state == "OFF") {
-      digitalWrite(LED_BUILTIN, HIGH);
-      feedback = "LED:OFF";
-    }
-  } else if (command.startsWith("SWITCH1:")) {
-    String state = command.substring(8);
-    if (state == "ON") {
-      digitalWrite(relay1Pin, HIGH);
-      feedback = "SWITCH1:ON";
-    } else if (state == "OFF") {
       digitalWrite(relay1Pin, LOW);
-      feedback = "SWITCH1:OFF";
+      feedback = "RELAY1:ON";
+    } else if (state == "OFF") {
+      digitalWrite(relay1Pin, HIGH);
+      feedback = "RELAY1:OFF";
     }
-  } 
-  
+  } else if (command.startsWith("RELAY2:")) { // ---------------------- ENVIA STATUS DO RELAY 2
+    String state = command.substring(7);
+    if (state == "ON") {
+      digitalWrite(relay2Pin, LOW);
+      feedback = "RELAY2:ON";
+    } else if (state == "OFF") {
+      digitalWrite(relay2Pin, HIGH);
+      feedback = "RELAY2:OFF";
+    }
+  }
+  // ------------------------------------------------------------------- ENVIA STATUS VIA LoRa
   Serial.println("Enviado LoRa[0x" + String(masterAddress) + "]: " + feedback);
+  Serial.println();
   sendMessage(feedback, masterAddress);
 }
 
 // --------------------------------------------------------------------- FUNÇÃO SETUP
 void setup() {
-  Serial.begin(115200);
-
-  pinMode(LED_BUILTIN, OUTPUT);
+  Serial.begin(115200);                                               // Inicia comunicação Serial
+  // ------------------------------------------------------------------- DEFINE PINOS COMO SAÍDA
   pinMode(relay1Pin, OUTPUT);
-
-  digitalWrite(LED_BUILTIN, HIGH);
-  digitalWrite(relay1Pin, LOW);
-
+  pinMode(relay2Pin, OUTPUT);
+  // ------------------------------------------------------------------- DEFINE ESTADO INICIAL 
+  digitalWrite(relay1Pin, HIGH);
+  digitalWrite(relay2Pin, HIGH);
+  // ------------------------------------------------------------------- INICIA O SENSOR DS18B20
+  sensors.begin();
+  sensors.requestTemperatures();                                      // Obtém valor de temperatura 
+  temperatura = sensors.getTempCByIndex(0);
+  // ------------------------------------------------------------------- CONFIGURA E INICIA O LoRa (433 MHz)  
   setupLoRa(433E6);
   LoRa.receive();
   
@@ -148,6 +156,13 @@ void setup() {
 void loop() {
   if(dataReceived) {
     receivedData();
-    dataReceived = false;
+    dataReceived = false;                                             // Atualiza Flag
+  }
+
+  if (millis() - lastSendTime >= interval && !dataReceived) {
+    // Coleta temperatura do sensor
+    sensors.requestTemperatures(); 
+    temperatura = sensors.getTempCByIndex(0);
+    lastSendTime = millis();
   }
 }
