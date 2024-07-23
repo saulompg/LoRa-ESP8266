@@ -5,9 +5,10 @@
 #include <DallasTemperature.h>
 
 // --------------------------------------------------------------------- VARIÁVEIS AUXILIARES
+static const int RX = 0x3;
 // --------------------------------------------------------------------- LoRa GPIO
 const int ss = D0;
-const int rst = D4;
+const int rst = RX;
 const int dio0 = D8;
 // --------------------------------------------------------------------- MENSAGEM
 volatile bool dataReceived = false;                                   // Acusa o recebimento de dados
@@ -16,7 +17,7 @@ byte masterAddress = 0x01;                                            // endere�
 byte broadcast = 0xFF;                                                // endereço broadcast
 // --------------------------------------------------------------------- TIMER
 unsigned long lastSendTime = 0;
-const int interval = 60000;
+const int interval = 40000;
 
 // --------------------------------------------------------------------- PINOUT RELAY
 const int relay1Pin = D1;
@@ -100,13 +101,15 @@ void receivedData(void) {
 void feedback(String command) {
   String feedback;
   // ------------------------------------------------------------------- DETERMINA MENSAGEM DE FEEDBACK
-  if (command == "STATE:REQUEST") { // --------------------------------- ENVIA STATUS DE TODOS OS DISPOSITIVOS
-    feedback = "STATE ";
-    feedback += "TEMP:" + String(temperatura) + " ";
-    feedback += "RELAY1:" + String(!digitalRead(relay1Pin) ? "ON" : "OFF") + " ";
-    feedback += "RELAY2:" + String(!digitalRead(relay2Pin) ? "ON" : "OFF");
-  }  else if (command == "TEMP:GET") { // ----------------------------- ENVIA VALOR DO SENSOR DE TEMPERATURA
-    feedback = "TEMP:" + String(temperatura);
+  if (command.startsWith("LED:")) { // ---------------------- ENVIA STATUS DO LED
+    String state = command.substring(4);
+    if (state == "ON") {
+      digitalWrite(LED_BUILTIN, LOW);
+      feedback = "LED:ON";
+    } else if (state == "OFF") {
+      digitalWrite(LED_BUILTIN, HIGH);
+      feedback = "LED:OFF";
+    }
   } else if (command.startsWith("RELAY1:")) { // ---------------------- ENVIA STATUS DO RELAY 1
     String state = command.substring(7);
     if (state == "ON") {
@@ -125,20 +128,35 @@ void feedback(String command) {
       digitalWrite(relay2Pin, HIGH);
       feedback = "RELAY2:OFF";
     }
-  }
+  } else if (command == "TEMP:GET") { // ----------------------------- ENVIA VALOR DO SENSOR DE TEMPERATURA
+    feedback = "TEMP:" + String(temperatura);
+  } else if (command == "STATE:REQUEST") { // --------------------------------- ENVIA STATUS DE TODOS OS DISPOSITIVOS
+    feedback = "STATE ";
+    feedback += "TEMP:" + String(temperatura) + " ";
+    feedback += "LED:" + String(!digitalRead(LED_BUILTIN) ? "ON" : "OFF") + " ";
+    feedback += "RELAY1:" + String(!digitalRead(relay1Pin) ? "ON" : "OFF") + " ";
+    feedback += "RELAY2:" + String(!digitalRead(relay2Pin) ? "ON" : "OFF");
+  } 
   // ------------------------------------------------------------------- ENVIA STATUS VIA LoRa
   Serial.println("Enviado LoRa[0x" + String(masterAddress) + "]: " + feedback);
   Serial.println();
   sendMessage(feedback, masterAddress);
 }
 
+// --------------------------------------------------------------------- SOLICITA O ULTIMO ESTADO
+void lastState() {
+  sendMessage("LAST:STATE", masterAddress);
+}
+
 // --------------------------------------------------------------------- FUNÇÃO SETUP
 void setup() {
   Serial.begin(115200);                                               // Inicia comunicação Serial
   // ------------------------------------------------------------------- DEFINE PINOS COMO SAÍDA
+  pinMode(LED_BUILTIN, OUTPUT);
   pinMode(relay1Pin, OUTPUT);
   pinMode(relay2Pin, OUTPUT);
   // ------------------------------------------------------------------- DEFINE ESTADO INICIAL 
+  digitalWrite(LED_BUILTIN, HIGH);
   digitalWrite(relay1Pin, HIGH);
   digitalWrite(relay2Pin, HIGH);
   // ------------------------------------------------------------------- INICIA O SENSOR DS18B20
@@ -148,8 +166,9 @@ void setup() {
   // ------------------------------------------------------------------- CONFIGURA E INICIA O LoRa (433 MHz)  
   setupLoRa(433E6);
   LoRa.receive();
-  
   Serial.println("\nESP8266 SLAVE iniciado");
+  // ------------------------------------------------------------------- SOLICITA AO MASTER O ÚLTIMO ESTADO DOS ACIONAMENTOS
+  lastState();
 }
 
 // --------------------------------------------------------------------- FUNÇÃO LOOP

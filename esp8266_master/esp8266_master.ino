@@ -5,12 +5,14 @@
 #include <PubSubClient.h>
 
 // --------------------------------------------------------------------- VARIÁVEIS AUXILIARES
+static const int RX = 0x3;
 // --------------------------------------------------------------------- WIFI
 IPAddress ip_esp(192,168,1,20);
 IPAddress gateway(192,168,1,1);
 IPAddress mask(255,255,255,0);
 // --------------------------------------------------------------------- MQTT
-IPAddress mqtt_server(192, 168, 1, 10);
+// IPAddress mqtt_server(192, 168, 1, 10);
+IPAddress mqtt_server(192, 168, 188, 248); 
 const int mqtt_port = 1883;
 const char* mqtt_user = "esp_mqtt";
 const char* mqtt_password = "4u70m4c40ESP";
@@ -19,15 +21,17 @@ PubSubClient client(esp_client);
 // --------------------------------------------------------------------- TÓPICOS AVAILABLE
 const char* topic_esp_available = "homeassistant/master/available";
 // --------------------------------------------------------------------- TÓPICOS SUBSCRIBER
+const char* topic_led_set = "homeassistant/slave/led/set";
 const char* topic_relay1_set = "homeassistant/slave/relay/1/set";
 const char* topic_relay2_set = "homeassistant/slave/relay/2/set";
 // --------------------------------------------------------------------- TÓPICOS PUBLISHER
 const char* topic_temp_value = "homeassistant/slave/sensor/ds18b20/get";
+const char* topic_led_state = "homeassistant/slave/led/state";
 const char* topic_relay1_state = "homeassistant/slave/relay/1/state";
 const char* topic_relay2_state = "homeassistant/slave/relay/2/state";
 // --------------------------------------------------------------------- LoRa GPIO
 const int ss = D0;
-const int rst = D4;
+const int rst = RX;
 const int dio0 = D8;
 // --------------------------------------------------------------------- MENSAGEM
 volatile bool dataReceived = false;                                   // Acusa o recebimento de dados
@@ -36,13 +40,13 @@ byte slaveAddress = 0x02;                                             // endere�
 byte broadcast = 0xFF;                                                // endereço broadcast
 // --------------------------------------------------------------------- TIMER
 unsigned long lastSendTime = 0;
-const int interval = 60000;
+const int interval = 120000;
 
 // --------------------------------------------------------------------- DECLARAÇÃO DAS FUNÇÕES
 // --------------------------------------------------------------------- CONFIGURAÇÃO WiFi
 void setupWiFi(void) {
   WiFiManager wm;
-  wm.setSTAStaticIPConfig(ip_esp, gateway, mask);
+  // wm.setSTAStaticIPConfig(ip_esp, gateway, mask);
   bool res = wm.autoConnect("ESP_MASTER", "automacaoESP");
   // ------------------------------------------------------------------- Verifica conexão WiFi
   if (!res) {
@@ -73,7 +77,9 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.println(message);
   // ------------------------------------------------------------------- Identifica no tópico para quem o comando será enviado
   String command;
-  if (String(topic) == topic_relay1_set) {
+  if (String(topic) == topic_led_set) {
+    command = "LED:" + message;
+  } else if (String(topic) == topic_relay1_set) {
     command = "RELAY1:" + message;
   } else if (String(topic) == topic_relay2_set) {
     command = "RELAY2:" + message;
@@ -84,6 +90,15 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.println(command);
     sendMessage(command, slaveAddress);
   }
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(50);
+  digitalWrite(LED_BUILTIN, HIGH);
+}
+
+void topicSubscribe(void) {
+  client.subscribe(topic_led_set);
+  client.subscribe(topic_relay1_set);
+  client.subscribe(topic_relay2_set);
 }
 
 // --------------------------------------------------------------------- CONEXÃO MQTT
@@ -93,8 +108,7 @@ void connectMQTT(void) {
     if(client.connect("ESP8266Master", mqtt_user, mqtt_password)) {
       Serial.println("Conectado!");
       client.publish(topic_esp_available, "online");
-      client.subscribe(topic_relay1_set);
-      client.subscribe(topic_relay2_set);
+      topicSubscribe();
     } else {
       Serial.print("Falha, rc=");
       Serial.print(client.state());
@@ -174,7 +188,12 @@ void receivedData(void) {
 // --------------------------------------------------------------------- ATUALIZA ESTADO NO DASHBOARD VIA MQTT
 void feedback(String message) {
   String state, topic;
-  if (message.startsWith("RELAY1:")) { // ------------------------------ RECEBE STATUS DO RELAY 1
+  if (message == "LAST:STATE") {
+    topicSubscribe();
+  } else if (message.startsWith("LED:")) { // -------------------------- RECEBE STATUS DO LED
+    state = message.substring(4);
+    topic = topic_led_state;
+  } else if (message.startsWith("RELAY1:")) { // ----------------------- RECEBE STATUS DO RELAY 1
     state = message.substring(7);
     topic = topic_relay1_state;
   } else if (message.startsWith("RELAY2:")) { // ----------------------- RECEBE STATUS DO RELAY 2
@@ -186,14 +205,17 @@ void feedback(String message) {
   } else if(message.startsWith("STATE")) { // -------------------------- RECEBE STATUS DE TODOS OS DISPOSITIVOS
     // ----------------------------------------------------------------- Identifica Index de cada item
     int temp_index = message.indexOf("TEMP:") + 5;
+    int led_index = message.indexOf("LED:") + 4;
     int relay1_state_index = message.indexOf("RELAY1:") + 7;
     int relay2_state_index = message.indexOf("RELAY2:") + 7;
     // ----------------------------------------------------------------- Identifica Status de cada item
     String temp_value = message.substring(temp_index, message.indexOf(" ", temp_index));
+    String led_value = message.substring(led_index, message.indexOf(" ", led_index));
     String relay1_state = message.substring(relay1_state_index, message.indexOf(" ", relay1_state_index));
     String relay2_state = message.substring(relay2_state_index, message.indexOf(" ", relay2_state_index));
     // ----------------------------------------------------------------- Envia Status de cada item via MQTT
     sendMQTT(String(topic_temp_value), temp_value);
+    sendMQTT(String(topic_led_state), led_value);
     sendMQTT(String(topic_relay1_state), relay1_state);
     sendMQTT(String(topic_relay2_state), relay2_state);
     Serial.println();
@@ -214,6 +236,8 @@ void sendMQTT(String topic, String msg) {
 // --------------------------------------------------------------------- FUNÇÃO SETUP
 void setup() {
   Serial.begin(115200);                                               // Inicia comunicação Serial
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
   setupWiFi();                                                        // Configura Access Point ou Conecta à rede 
   setupMQTT();                                                        // Define servidor MQTT a ser conectado e função callback ao receber mensagem
   setupLoRa(433E6);                                                   // Configura e inicia o LoRa (433 MHz ou 915 MHz)
