@@ -8,6 +8,6 @@
   |    MOSI    | D7 - GPIO13 |
   |    SCK     | D5 - GPIO14 |
   |    NSS     | D0 - GPIO16 |
-  |    RST     | D4 - GPIO02 |
+  |    RST     | RX - GPIO03 |
   |    DIO0    | D8 - GPIO15 |
 
